@@ -1,0 +1,56 @@
+# Sử dụng Alpine Linux làm base image siêu nhẹ
+FROM alpine:latest
+
+# Cài đặt các gói cần thiết:
+# - qemu-system-i386: Trình giả lập phần cứng cho kiến trúc x86 (32-bit)
+# - qemu-img: Công cụ quản lý ổ đĩa ảo (nếu cần)
+# - novnc: Giao diện web để truy cập VNC
+# - websockify: Cầu nối giữa VNC và WebSocket
+# - bash: Shell để chạy script
+# - curl: Tải file ISO
+# - tini: Init process nhỏ gọn để xử lý zombie process
+RUN apk add --no-cache \
+    qemu-system-i386 \
+    qemu-img \
+    novnc \
+    websockify \
+    bash \
+    curl \
+    tini
+
+# Tải file ISO của Tiny Core Linux (CorePlus 15.0 - 32-bit, có GUI)
+# Bạn có thể thay đổi phiên bản bằng cách sửa URL bên dưới
+RUN curl -L -o /tinycore.iso http://tinycorelinux.net/15.x/x86/release/CorePlus-15.0.iso
+
+# Tạo script khởi chạy
+RUN cat <<'EOF' > /start.sh
+#!/bin/bash
+set -e
+
+# Sử dụng biến môi trường PORT do Railway cung cấp, mặc định là 8080
+PORT=${PORT:-8080}
+
+echo "Khởi động QEMU với Tiny Core Linux..."
+qemu-system-i386 \
+    -m 256 \
+    -cdrom /tinycore.iso \
+    -boot d \
+    -vnc 0.0.0.0:0 \
+    -daemonize
+
+# Đợi QEMU khởi động và mở cổng VNC
+sleep 5
+
+echo "Khởi động noVNC proxy trên cổng $PORT..."
+websockify --web /usr/share/novnc/ $PORT localhost:5900
+EOF
+RUN chmod +x /start.sh
+
+# Mở cổng 8080 (chỉ mang tính documentation, Railway sẽ dùng biến PORT)
+EXPOSE 8080
+
+# Sử dụng tini làm init process
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Chạy script khởi chạy
+CMD ["/start.sh"]
